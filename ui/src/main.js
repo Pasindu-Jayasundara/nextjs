@@ -195,6 +195,9 @@ const sampleProducts = [
   { id: 'p4', title: 'Quanta Speaker', price: 89, desc: 'Portable Bluetooth speaker with rich bass and 12h battery.', img: 'https://via.placeholder.com/320x180?text=Quanta' }
 ]
 
+// current products data (will be fetched from server)
+let productsData = sampleProducts.slice()
+
 function renderProducts(list) {
   if (!productsGrid) return
   productsGrid.innerHTML = ''
@@ -215,7 +218,7 @@ function renderProducts(list) {
   productsGrid.querySelectorAll('button[data-id]').forEach(b => {
     b.addEventListener('click', (e) => {
       const id = e.currentTarget.getAttribute('data-id')
-      const prod = sampleProducts.find(x => x.id === id)
+      const prod = (productsData || []).find(x => x.id === id)
       if (prod) showProductDetail(prod)
     })
   })
@@ -226,7 +229,14 @@ function showProducts() {
   dashboardRoot.classList.add('hidden')
   profileRoot.classList.add('hidden')
   productsRoot.classList.remove('hidden')
-  renderProducts(sampleProducts)
+  // fetch products from backend, fallback to sample
+  fetch(`${API}/api/products`).then(r => r.json()).then(list => {
+    productsData = Array.isArray(list) ? list : sampleProducts
+    renderProducts(productsData)
+  }).catch(() => {
+    productsData = sampleProducts
+    renderProducts(productsData)
+  })
 }
 
 function showProductDetail(prod) {
@@ -237,6 +247,11 @@ function showProductDetail(prod) {
     <p class="price">$${prod.price}</p>
     <p>${prod.desc}</p>
   `
+  // wire Buy button to open checkout for this product
+  const buyBtn = document.getElementById('product-detail-buy')
+  if (buyBtn) {
+    buyBtn.onclick = () => openCheckoutFor(prod)
+  }
   productDetail.classList.remove('hidden')
 }
 
@@ -289,7 +304,7 @@ function renderPaymentMethods() {
     el.innerHTML = `
       <div>
         <div class="pm-name">${m.cardholder}</div>
-        <div class="pm-num">${maskCard(m.number)}</div>
+        <div class="pm-num">${m.last4 ? '•••• •••• •••• ' + m.last4 : ''}</div>
       </div>
       <div class="pm-actions">
         <button data-id="${m.id}" class="toggle select-payment">Select</button>
@@ -340,9 +355,12 @@ addPaymentForm?.addEventListener('submit', (e) => {
     paymentMessage.classList.add('error')
     return
   }
+  // Tokenize card client-side for demo: store only token + last4
   const methods = getPaymentMethods()
   const id = 'pm_' + Date.now().toString(36)
-  methods.push({ id, cardholder: name, number: number, expiry, cvv })
+  const token = 'tok_' + Math.random().toString(36).slice(2, 10)
+  const last4 = (number.replace(/\D+/g, '').slice(-4)) || ''
+  methods.push({ id, token, cardholder: name, last4, expiry })
   setPaymentMethods(methods)
   cardNameInput.value = ''
   cardNumberInput.value = ''
@@ -368,17 +386,37 @@ processPaymentBtn?.addEventListener('click', () => {
     paymentMessage.classList.add('error')
     return
   }
+  // Call backend payments API (mock) with tokenized payment method
+  const user = getUser() || {}
+  const token = user.token
+  if (!token) {
+    paymentMessage.textContent = 'Please sign in to complete payment.'
+    paymentMessage.classList.add('error')
+    return
+  }
 
-  // Demo process: record a transaction in localStorage
-  const txList = JSON.parse(localStorage.getItem(TX_KEY) || '[]')
-  const tx = { id: 'tx_' + Date.now().toString(36), productId: currentProductForCheckout.id, productTitle: currentProductForCheckout.title, amount: currentProductForCheckout.price, methodId: method.id, date: new Date().toISOString() }
-  txList.push(tx)
-  localStorage.setItem(TX_KEY, JSON.stringify(txList))
-
-  paymentMessage.textContent = 'Payment successful — thank you!'
-  paymentMessage.classList.add('success')
-  // close after a short delay
-  setTimeout(() => { closeCheckout(); hideProductDetail() }, 900)
+  fetch(`${API}/api/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ productId: currentProductForCheckout.id, paymentToken: method.token, amount: currentProductForCheckout.price })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      paymentMessage.textContent = result.json.error || 'Payment failed'
+      paymentMessage.classList.add('error')
+      return
+    }
+    // record server-side transaction is already stored on server; locally we can also keep a light record
+    const txList = JSON.parse(localStorage.getItem(TX_KEY) || '[]')
+    txList.push({ id: result.json.transaction.id, productId: result.json.transaction.productId, amount: result.json.transaction.amount, date: result.json.transaction.date })
+    localStorage.setItem(TX_KEY, JSON.stringify(txList))
+    paymentMessage.textContent = 'Payment successful — thank you!'
+    paymentMessage.classList.add('success')
+    setTimeout(() => { closeCheckout(); hideProductDetail() }, 900)
+  }).catch(err => {
+    console.error('Payment call failed', err)
+    paymentMessage.textContent = 'Payment failed, please try again.'
+    paymentMessage.classList.add('error')
+  })
 })
 
 checkoutClose?.addEventListener('click', () => closeCheckout())
@@ -443,27 +481,29 @@ loginForm.addEventListener('submit', (e) => {
     msg.classList.add('error')
     return
   }
-  // Check stored user (if any) to validate password for demo
-  const stored = getUser()
-  if (stored && stored.password) {
-    if (stored.email !== email || stored.password !== password) {
-      msg.textContent = 'Invalid email or password.'
+  // Call backend login
+  fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      msg.textContent = result.json.error || 'Login failed'
       msg.classList.add('error')
       return
     }
-    // success
-    msg.textContent = `Signed in as ${email}`
+    const data = result.json
+    // store id/email/name/token
+    const user = { id: data.id, email: data.email, name: data.name || '', token: data.token }
+    setUser(user)
+    msg.textContent = `Signed in as ${data.email}`
     msg.classList.add('success')
-    setTimeout(() => showDashboard(stored), 600)
-    return
-  }
-
-  // No stored password (legacy/demo): accept and set a minimal user
-  const user = { email }
-  setUser(user)
-  msg.textContent = `Signed in as ${email}`
-  msg.classList.add('success')
-  setTimeout(() => showDashboard(user), 600)
+    setTimeout(() => showDashboard(user), 600)
+  }).catch(err => {
+    console.error('Login error', err)
+    msg.textContent = 'Login failed'
+    msg.classList.add('error')
+  })
 })
 
 registerForm.addEventListener('submit', (e) => {
@@ -486,11 +526,28 @@ registerForm.addEventListener('submit', (e) => {
     return
   }
 
-  const user = { name, email, password }
-  setUser(user)
-  msg.textContent = `Account created for ${name}`
-  msg.classList.add('success')
-  setTimeout(() => showDashboard(user), 800)
+  // Call backend register
+  fetch(`${API}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      msg.textContent = result.json.error || 'Registration failed'
+      msg.classList.add('error')
+      return
+    }
+    const data = result.json
+    const user = { id: data.id, email: data.email, name: data.name || '', token: data.token }
+    setUser(user)
+    msg.textContent = `Account created for ${name}`
+    msg.classList.add('success')
+    setTimeout(() => showDashboard(user), 800)
+  }).catch(err => {
+    console.error('Register error', err)
+    msg.textContent = 'Registration failed'
+    msg.classList.add('error')
+  })
 })
 
 btnLogout.addEventListener('click', () => {
@@ -574,23 +631,35 @@ changePasswordForm.addEventListener('submit', (e) => {
     return
   }
 
-  // If a password is already stored, require current to match
-  if (user.password) {
-    if (user.password !== current) {
-      passwordMessage.textContent = 'Current password is incorrect.'
+  // Call backend change-password endpoint (requires JWT)
+  const token = user.token
+  if (!token) {
+    passwordMessage.textContent = 'You must be signed in to change password.'
+    passwordMessage.classList.add('error')
+    return
+  }
+
+  fetch(`${API}/api/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ currentPassword: current, newPassword: next })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      passwordMessage.textContent = result.json.error || 'Password change failed'
       passwordMessage.classList.add('error')
       return
     }
-  }
-
-  user.password = next
-  setUser(user)
-  passwordMessage.textContent = 'Password updated.'
-  passwordMessage.classList.add('success')
-  // clear inputs
-  currentPasswordInput.value = ''
-  newPasswordInput.value = ''
-  confirmPasswordInput.value = ''
+    passwordMessage.textContent = 'Password updated.'
+    passwordMessage.classList.add('success')
+    // clear inputs
+    currentPasswordInput.value = ''
+    newPasswordInput.value = ''
+    confirmPasswordInput.value = ''
+  }).catch(err => {
+    console.error('Change password error', err)
+    passwordMessage.textContent = 'Password change failed'
+    passwordMessage.classList.add('error')
+  })
 })
 
 // Products navigation handlers
