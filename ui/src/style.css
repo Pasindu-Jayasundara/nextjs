@@ -140,6 +140,25 @@ button:focus-visible {
 .message.error { color: #ff7b7b }
 .message.success { color: #7bffbf }
 
+/* Dashboard styles */
+.dashboard-root { width: 100%; display: flex; justify-content: center; padding: 2rem 0 }
+.dashboard { width: 880px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius: 12px; padding: 1rem 1.25rem }
+.dashboard-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem }
+.dash-actions { display: flex; gap: 0.5rem }
+.dashboard-widgets { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem }
+.widget { background: rgba(0,0,0,0.18); padding: 0.8rem; border-radius: 10px }
+.widget h3 { margin-top: 0; margin-bottom: 0.5rem }
+
+/* small utility */
+.hidden { display: none !important }
+
+/* Profile / change-password styles */
+.profile-root { width: 100%; display: flex; justify-content: center; padding: 2rem 0 }
+.profile-card { width: 560px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius: 12px; padding: 1rem 1.25rem }
+.profile-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem }
+.profile-card hr { border: none; border-top: 1px solid rgba(255,255,255,0.04); margin: 0.75rem 0 }
+
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
