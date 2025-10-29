@@ -2,6 +2,8 @@ import './style.css'
 import javascriptLogo from './javascript.svg'
 import viteLogo from '/vite.svg'
 import { setupCounter } from './counter.js'
+// API base (backend Express server)
+const API = 'http://localhost:3000'
 // Simple Login / Register UI injected into #app
 import './style.css'
 import javascriptLogo from './javascript.svg'
@@ -44,6 +46,7 @@ document.querySelector('#app').innerHTML = `
       <header class="dashboard-header">
         <h2 id="dash-welcome">Dashboard</h2>
         <div class="dash-actions">
+          <button id="btn-products" class="toggle">Products</button>
           <button id="btn-logout" class="toggle">Logout</button>
         </div>
       </header>
@@ -94,6 +97,59 @@ document.querySelector('#app').innerHTML = `
       </form>
     </div>
   </div>
+  
+  <div class="products-root hidden">
+    <div class="products-card">
+      <header class="products-header">
+        <h2>Products</h2>
+        <div class="dash-actions">
+          <button id="btn-products-back" class="toggle">Back</button>
+        </div>
+      </header>
+      <section id="products-grid" class="products-grid">
+        <!-- product cards will be rendered here -->
+      </section>
+      <div id="product-detail" class="product-detail hidden">
+        <div class="product-detail-actions">
+          <button id="product-detail-close" class="toggle">Close</button>
+          <button id="product-detail-buy" class="primary">Buy</button>
+        </div>
+        <div id="product-detail-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Checkout / Payment modal (demo, client-side) -->
+  <div id="checkout-root" class="checkout-root hidden">
+    <div class="checkout-card">
+      <header class="profile-header">
+        <h2>Checkout</h2>
+        <div class="dash-actions">
+          <button id="checkout-close" class="toggle">Close</button>
+        </div>
+      </header>
+
+      <section>
+        <h4>Payment methods</h4>
+        <div id="payment-methods-list" class="payment-methods-list"></div>
+        <hr />
+        <h4>Add a payment method</h4>
+        <form id="add-payment-form" class="auth-form">
+          <label>Cardholder name<input id="card-name" required placeholder="Full name"/></label>
+          <label>Card number<input id="card-number" required placeholder="4242 4242 4242 4242"/></label>
+          <label>Expiry<input id="card-expiry" required placeholder="MM/YY"/></label>
+          <label>CVV<input id="card-cvv" required placeholder="123"/></label>
+          <div class="actions">
+            <button type="submit" class="primary">Add card</button>
+          </div>
+        </form>
+        <div id="payment-message" class="message" aria-live="polite"></div>
+        <div style="margin-top:0.75rem; display:flex; justify-content:flex-end; gap:0.5rem">
+          <button id="process-payment-btn" class="primary">Pay</button>
+        </div>
+      </section>
+    </div>
+  </div>
 `
 
 // Elements
@@ -122,6 +178,248 @@ const passwordMessage = document.getElementById('password-message')
 // we add them dynamically after DOM is ready
 let btnEditProfile
 let btnChangePassword
+// products elements
+let btnProducts = document.getElementById('btn-products')
+let productsRoot = document.querySelector('.products-root')
+let productsGrid = document.getElementById('products-grid')
+let btnProductsBack = document.getElementById('btn-products-back')
+let productDetail = document.getElementById('product-detail')
+let productDetailClose = document.getElementById('product-detail-close')
+let productDetailContent = document.getElementById('product-detail-content')
+
+// Sample products
+const sampleProducts = [
+  { id: 'p1', title: 'Aurora Headphones', price: 129, desc: 'Wireless over-ear headphones with active noise cancellation.', img: 'https://via.placeholder.com/320x180?text=Aurora' },
+  { id: 'p2', title: 'Nimbus Smartwatch', price: 199, desc: 'Lightweight smartwatch with health tracking and GPS.', img: 'https://via.placeholder.com/320x180?text=Nimbus' },
+  { id: 'p3', title: 'Lumen Desk Lamp', price: 59, desc: 'Adjustable LED lamp with touch controls and warm/cool modes.', img: 'https://via.placeholder.com/320x180?text=Lumen' },
+  { id: 'p4', title: 'Quanta Speaker', price: 89, desc: 'Portable Bluetooth speaker with rich bass and 12h battery.', img: 'https://via.placeholder.com/320x180?text=Quanta' }
+]
+
+// current products data (will be fetched from server)
+let productsData = sampleProducts.slice()
+
+function renderProducts(list) {
+  if (!productsGrid) return
+  productsGrid.innerHTML = ''
+  list.forEach(p => {
+    const card = document.createElement('article')
+    card.className = 'product-card'
+    card.innerHTML = `
+      <img src="${p.img}" alt="${p.title}" />
+      <h4>${p.title}</h4>
+      <p class="price">$${p.price}</p>
+      <p class="short">${p.desc}</p>
+      <div class="card-actions"><button data-id="${p.id}" class="toggle">View</button></div>
+    `
+    productsGrid.appendChild(card)
+  })
+
+  // attach listeners
+  productsGrid.querySelectorAll('button[data-id]').forEach(b => {
+    b.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id')
+      const prod = (productsData || []).find(x => x.id === id)
+      if (prod) showProductDetail(prod)
+    })
+  })
+}
+
+function showProducts() {
+  authRoot.classList.add('hidden')
+  dashboardRoot.classList.add('hidden')
+  profileRoot.classList.add('hidden')
+  productsRoot.classList.remove('hidden')
+  // fetch products from backend, fallback to sample
+  fetch(`${API}/api/products`).then(r => r.json()).then(list => {
+    productsData = Array.isArray(list) ? list : sampleProducts
+    renderProducts(productsData)
+  }).catch(() => {
+    productsData = sampleProducts
+    renderProducts(productsData)
+  })
+}
+
+function showProductDetail(prod) {
+  if (!productDetail || !productDetailContent) return
+  productDetailContent.innerHTML = `
+    <h3>${prod.title}</h3>
+    <img src="${prod.img}" alt="${prod.title}" />
+    <p class="price">$${prod.price}</p>
+    <p>${prod.desc}</p>
+  `
+  // wire Buy button to open checkout for this product
+  const buyBtn = document.getElementById('product-detail-buy')
+  if (buyBtn) {
+    buyBtn.onclick = () => openCheckoutFor(prod)
+  }
+  productDetail.classList.remove('hidden')
+}
+
+function hideProductDetail() {
+  if (!productDetail) return
+  productDetail.classList.add('hidden')
+}
+
+// --- Payment / Checkout (client-side demo) ---
+let checkoutRoot = document.getElementById('checkout-root')
+let checkoutClose = document.getElementById('checkout-close')
+let paymentMethodsList = document.getElementById('payment-methods-list')
+let addPaymentForm = document.getElementById('add-payment-form')
+let cardNameInput = document.getElementById('card-name')
+let cardNumberInput = document.getElementById('card-number')
+let cardExpiryInput = document.getElementById('card-expiry')
+let cardCvvInput = document.getElementById('card-cvv')
+let paymentMessage = document.getElementById('payment-message')
+let processPaymentBtn = document.getElementById('process-payment-btn')
+
+const PAYMENT_KEY = 'payment_methods'
+const TX_KEY = 'transactions'
+let currentProductForCheckout = null
+let selectedPaymentId = null
+
+function getPaymentMethods() {
+  try {
+    const raw = localStorage.getItem(PAYMENT_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch (err) { return [] }
+}
+
+function setPaymentMethods(list) {
+  localStorage.setItem(PAYMENT_KEY, JSON.stringify(list))
+}
+
+function maskCard(num) {
+  const s = (num || '').replace(/\s+/g, '')
+  if (s.length < 4) return '••••'
+  return '•••• •••• •••• ' + s.slice(-4)
+}
+
+function renderPaymentMethods() {
+  const list = getPaymentMethods()
+  paymentMethodsList.innerHTML = ''
+  if (!list.length) paymentMethodsList.innerHTML = '<p class="read-the-docs">No payment methods saved.</p>'
+  list.forEach(m => {
+    const el = document.createElement('div')
+    el.className = 'payment-method-item'
+    el.innerHTML = `
+      <div>
+        <div class="pm-name">${m.cardholder}</div>
+        <div class="pm-num">${m.last4 ? '•••• •••• •••• ' + m.last4 : ''}</div>
+      </div>
+      <div class="pm-actions">
+        <button data-id="${m.id}" class="toggle select-payment">Select</button>
+        <button data-id="${m.id}" class="toggle remove-payment">Remove</button>
+      </div>
+    `
+    paymentMethodsList.appendChild(el)
+  })
+
+  // attach listeners
+  paymentMethodsList.querySelectorAll('.select-payment').forEach(b => b.addEventListener('click', (e) => {
+    selectedPaymentId = e.currentTarget.getAttribute('data-id')
+    paymentMessage.textContent = 'Selected payment method.'
+    paymentMessage.classList.remove('error')
+    paymentMessage.classList.add('success')
+  }))
+  paymentMethodsList.querySelectorAll('.remove-payment').forEach(b => b.addEventListener('click', (e) => {
+    const id = e.currentTarget.getAttribute('data-id')
+    const left = getPaymentMethods().filter(x => x.id !== id)
+    setPaymentMethods(left)
+    renderPaymentMethods()
+  }))
+}
+
+function openCheckoutFor(product) {
+  currentProductForCheckout = product
+  selectedPaymentId = null
+  paymentMessage.textContent = ''
+  checkoutRoot.classList.remove('hidden')
+  renderPaymentMethods()
+}
+
+function closeCheckout() {
+  checkoutRoot.classList.add('hidden')
+  currentProductForCheckout = null
+}
+
+addPaymentForm?.addEventListener('submit', (e) => {
+  e.preventDefault()
+  const name = (cardNameInput.value || '').trim()
+  const number = (cardNumberInput.value || '').trim()
+  const expiry = (cardExpiryInput.value || '').trim()
+  const cvv = (cardCvvInput.value || '').trim()
+  paymentMessage.textContent = ''
+  paymentMessage.classList.remove('error', 'success')
+  if (!name || !number || !expiry || !cvv) {
+    paymentMessage.textContent = 'Please fill all card fields.'
+    paymentMessage.classList.add('error')
+    return
+  }
+  // Tokenize card client-side for demo: store only token + last4
+  const methods = getPaymentMethods()
+  const id = 'pm_' + Date.now().toString(36)
+  const token = 'tok_' + Math.random().toString(36).slice(2, 10)
+  const last4 = (number.replace(/\D+/g, '').slice(-4)) || ''
+  methods.push({ id, token, cardholder: name, last4, expiry })
+  setPaymentMethods(methods)
+  cardNameInput.value = ''
+  cardNumberInput.value = ''
+  cardExpiryInput.value = ''
+  cardCvvInput.value = ''
+  paymentMessage.textContent = 'Card added.'
+  paymentMessage.classList.add('success')
+  renderPaymentMethods()
+})
+
+processPaymentBtn?.addEventListener('click', () => {
+  paymentMessage.textContent = ''
+  paymentMessage.classList.remove('error', 'success')
+  if (!currentProductForCheckout) {
+    paymentMessage.textContent = 'No product selected.'
+    paymentMessage.classList.add('error')
+    return
+  }
+  const methods = getPaymentMethods()
+  const method = methods.find(m => m.id === selectedPaymentId)
+  if (!method) {
+    paymentMessage.textContent = 'Please select a payment method.'
+    paymentMessage.classList.add('error')
+    return
+  }
+  // Call backend payments API (mock) with tokenized payment method
+  const user = getUser() || {}
+  const token = user.token
+  if (!token) {
+    paymentMessage.textContent = 'Please sign in to complete payment.'
+    paymentMessage.classList.add('error')
+    return
+  }
+
+  fetch(`${API}/api/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ productId: currentProductForCheckout.id, paymentToken: method.token, amount: currentProductForCheckout.price })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      paymentMessage.textContent = result.json.error || 'Payment failed'
+      paymentMessage.classList.add('error')
+      return
+    }
+    // record server-side transaction is already stored on server; locally we can also keep a light record
+    const txList = JSON.parse(localStorage.getItem(TX_KEY) || '[]')
+    txList.push({ id: result.json.transaction.id, productId: result.json.transaction.productId, amount: result.json.transaction.amount, date: result.json.transaction.date })
+    localStorage.setItem(TX_KEY, JSON.stringify(txList))
+    paymentMessage.textContent = 'Payment successful — thank you!'
+    paymentMessage.classList.add('success')
+    setTimeout(() => { closeCheckout(); hideProductDetail() }, 900)
+  }).catch(err => {
+    console.error('Payment call failed', err)
+    paymentMessage.textContent = 'Payment failed, please try again.'
+    paymentMessage.classList.add('error')
+  })
+})
+
+checkoutClose?.addEventListener('click', () => closeCheckout())
 
 function showLogin() {
   btnLogin.classList.add('active')
@@ -183,27 +481,29 @@ loginForm.addEventListener('submit', (e) => {
     msg.classList.add('error')
     return
   }
-  // Check stored user (if any) to validate password for demo
-  const stored = getUser()
-  if (stored && stored.password) {
-    if (stored.email !== email || stored.password !== password) {
-      msg.textContent = 'Invalid email or password.'
+  // Call backend login
+  fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      msg.textContent = result.json.error || 'Login failed'
       msg.classList.add('error')
       return
     }
-    // success
-    msg.textContent = `Signed in as ${email}`
+    const data = result.json
+    // store id/email/name/token
+    const user = { id: data.id, email: data.email, name: data.name || '', token: data.token }
+    setUser(user)
+    msg.textContent = `Signed in as ${data.email}`
     msg.classList.add('success')
-    setTimeout(() => showDashboard(stored), 600)
-    return
-  }
-
-  // No stored password (legacy/demo): accept and set a minimal user
-  const user = { email }
-  setUser(user)
-  msg.textContent = `Signed in as ${email}`
-  msg.classList.add('success')
-  setTimeout(() => showDashboard(user), 600)
+    setTimeout(() => showDashboard(user), 600)
+  }).catch(err => {
+    console.error('Login error', err)
+    msg.textContent = 'Login failed'
+    msg.classList.add('error')
+  })
 })
 
 registerForm.addEventListener('submit', (e) => {
@@ -226,11 +526,28 @@ registerForm.addEventListener('submit', (e) => {
     return
   }
 
-  const user = { name, email, password }
-  setUser(user)
-  msg.textContent = `Account created for ${name}`
-  msg.classList.add('success')
-  setTimeout(() => showDashboard(user), 800)
+  // Call backend register
+  fetch(`${API}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      msg.textContent = result.json.error || 'Registration failed'
+      msg.classList.add('error')
+      return
+    }
+    const data = result.json
+    const user = { id: data.id, email: data.email, name: data.name || '', token: data.token }
+    setUser(user)
+    msg.textContent = `Account created for ${name}`
+    msg.classList.add('success')
+    setTimeout(() => showDashboard(user), 800)
+  }).catch(err => {
+    console.error('Register error', err)
+    msg.textContent = 'Registration failed'
+    msg.classList.add('error')
+  })
 })
 
 btnLogout.addEventListener('click', () => {
@@ -314,24 +631,41 @@ changePasswordForm.addEventListener('submit', (e) => {
     return
   }
 
-  // If a password is already stored, require current to match
-  if (user.password) {
-    if (user.password !== current) {
-      passwordMessage.textContent = 'Current password is incorrect.'
+  // Call backend change-password endpoint (requires JWT)
+  const token = user.token
+  if (!token) {
+    passwordMessage.textContent = 'You must be signed in to change password.'
+    passwordMessage.classList.add('error')
+    return
+  }
+
+  fetch(`${API}/api/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ currentPassword: current, newPassword: next })
+  }).then(r => r.json().then(json => ({ ok: r.ok, status: r.status, json }))).then(result => {
+    if (!result.ok) {
+      passwordMessage.textContent = result.json.error || 'Password change failed'
       passwordMessage.classList.add('error')
       return
     }
-  }
-
-  user.password = next
-  setUser(user)
-  passwordMessage.textContent = 'Password updated.'
-  passwordMessage.classList.add('success')
-  // clear inputs
-  currentPasswordInput.value = ''
-  newPasswordInput.value = ''
-  confirmPasswordInput.value = ''
+    passwordMessage.textContent = 'Password updated.'
+    passwordMessage.classList.add('success')
+    // clear inputs
+    currentPasswordInput.value = ''
+    newPasswordInput.value = ''
+    confirmPasswordInput.value = ''
+  }).catch(err => {
+    console.error('Change password error', err)
+    passwordMessage.textContent = 'Password change failed'
+    passwordMessage.classList.add('error')
+  })
 })
+
+// Products navigation handlers
+if (btnProducts) btnProducts.addEventListener('click', () => showProducts())
+if (btnProductsBack) btnProductsBack.addEventListener('click', () => { productsRoot.classList.add('hidden'); showDashboard(getUser() || {}) })
+if (productDetailClose) productDetailClose.addEventListener('click', hideProductDetail)
 
 // On load: if user exists, go straight to dashboard
 const existing = getUser()

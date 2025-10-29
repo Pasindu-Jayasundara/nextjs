@@ -53,4 +53,39 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST /api/auth/change-password
+router.post('/change-password', async (req, res) => {
+  try {
+    // Expect Bearer token
+    const authHeader = req.headers.authorization || '';
+    if (!authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+
+    const token = authHeader.split(' ')[1];
+    let payload;
+    try {
+      payload = jwt.verify(token, JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    if (typeof newPassword !== 'string' || newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+
+    const user = users.find(u => u.id === payload.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!matches) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const salt = await bcrypt.genSalt(10);
+    user.passwordHash = await bcrypt.hash(newPassword, salt);
+
+    return res.json({ message: 'Password updated' });
+  } catch (err) {
+    console.error('Change-password error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 module.exports = router;
