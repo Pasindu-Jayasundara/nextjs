@@ -8,6 +8,13 @@ app.use(express.json());
 const authRouter = require('./routes/auth');
 app.use('/api/auth', authRouter);
 
+// Mount products and payments routes
+const productsRouter = require('./routes/products');
+app.use('/api/products', productsRouter);
+
+const paymentsRouter = require('./routes/payments');
+app.use('/api/payments', paymentsRouter);
+
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
